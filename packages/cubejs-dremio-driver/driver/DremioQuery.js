@@ -1,4 +1,3 @@
-const moment = require('moment-timezone');
 const { BaseFilter, BaseQuery } = require('@cubejs-backend/schema-compiler');
 
 const GRANULARITY_TO_INTERVAL = {
@@ -36,9 +35,15 @@ class DremioQuery extends BaseQuery {
     return new DremioFilter(this, filter);
   }
 
+  /**
+   * CONVERT_TIMEZONE([sourceTimezone string], destinationTimezone string,
+   *    timestamp date, timestamp, or string in ISO 8601 format) → timestamp
+   * sourceTimezone (optional): The time zone of the timestamp. If you omit this parameter,
+   *    Dremio assumes that the source time zone is UTC.
+   * @see https://docs.dremio.com/cloud/reference/sql/sql-functions/functions/CONVERT_TIMEZONE/
+   */
   convertTz(field) {
-    const targetTZ = moment().tz(this.timezone).format('Z');
-    return `CONVERT_TIMEZONE('${targetTZ}', ${field})`;
+    return `CONVERT_TIMEZONE('${this.timezone}', ${field})`;
   }
 
   timeStampCast(value) {
@@ -46,7 +51,7 @@ class DremioQuery extends BaseQuery {
   }
 
   timestampFormat() {
-    return moment.HTML5_FMT.DATETIME_LOCAL_MS;
+    return 'YYYY-MM-DDTHH:mm:ss.SSS';
   }
 
   dateTimeCast(value) {
@@ -73,7 +78,7 @@ class DremioQuery extends BaseQuery {
     const values = timeDimension.timeSeries().map(
       ([from, to]) => `select '${from}' f, '${to}' t`
     ).join(' UNION ALL ');
-    return `SELECT TIMESTAMP(dates.f) date_from, TIMESTAMP(dates.t) date_to FROM (${values}) AS dates`;
+    return `SELECT TO_TIMESTAMP(dates.f, 'YYYY-MM-DDTHH:MI:SS.FFF') date_from, TO_TIMESTAMP(dates.t, 'YYYY-MM-DDTHH:MI:SS.FFF') date_to FROM (${values}) AS dates`;
   }
 
   concatStringsSql(strings) {
