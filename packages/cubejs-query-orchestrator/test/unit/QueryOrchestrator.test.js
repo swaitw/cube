@@ -8,6 +8,7 @@ class MockDriver {
     this.tablesReady = [];
     this.executedQueries = [];
     this.cancelledQueries = [];
+    this.droppedTables = [];
     this.csvImport = csvImport;
     this.now = new Date().getTime();
     this.schemaData = schemaData;
@@ -95,8 +96,22 @@ class MockDriver {
   }
 
   async dropTable(tableName) {
+    if (this.droppedTables.indexOf(tableName) !== -1) {
+      throw new Error(`Can't drop table twice: ${tableName}`);
+    }
+    this.droppedTables.push(tableName);
+    console.log(`Driver drops ${tableName}`);
+    if (!this.tablesObj.find(t => (t.tableName || t) === tableName)) {
+      throw new Error(`Can't drop missing table: ${tableName}`);
+    }
+    await this.query(`DROP TABLE ${tableName}`);
+    if (this.tablesDropDelay) {
+      await this.delay(this.tablesDropDelay);
+    }
+    if (!this.tablesObj.find(t => (t.tableName || t) === tableName)) {
+      throw new Error(`Can't drop missing table: ${tableName}`);
+    }
     this.tablesObj = this.tablesObj.filter(t => (t.tableName || t) !== tableName);
-    return this.query(`DROP TABLE ${tableName}`);
   }
 
   async downloadTable(table, { csvImport } = {}) {
@@ -117,19 +132,17 @@ class MockDriver {
   capabilities() {
     return {};
   }
-  
-  tablesSchema() {
-    return this.schemaData;
-  }
 
-  async streamQuery(sql) {
-    return Readable.from((await this.query(sql)).map(r => (typeof r === 'string' ? { query: r } : r)));
+  async stream(sql) {
+    return {
+      rowStream: Readable.from((await this.query(sql)).map(r => (typeof r === 'string' ? { query: r } : r)))
+    };
   }
 }
 
 class ExternalMockDriver extends MockDriver {
-  constructor({ schemaData } = {}) {
-    super({ schemaData });
+  constructor() {
+    super();
     this.indexes = [];
     this.csvFiles = [];
   }
@@ -223,7 +236,7 @@ describe('QueryOrchestrator', () => {
     const csvMockDriverLocal = new MockDriver({ csvImport: 'true' });
     const mockDriverUnloadWithoutTempTableSupportLocal = new MockDriverUnloadWithoutTempTableSupport();
     const streamingSourceMockDriverLocal = new StreamingSourceMockDriver();
-    const externalMockDriverLocal = new ExternalMockDriver({ schemaData });
+    const externalMockDriverLocal = new ExternalMockDriver();
 
     const redisPrefix = `ORCHESTRATOR_TEST_${testCount++}`;
     const driverFactory = (dataSource) => {
@@ -280,6 +293,7 @@ describe('QueryOrchestrator', () => {
         preAggregationsOptions: {
           ...options('p1').preAggregationsOptions,
           dropPreAggregationsWithoutTouch: true,
+          touchTablePersistTime: 1,
         },
       });
     mockDriver = mockDriverLocal;
@@ -808,6 +822,40 @@ describe('QueryOrchestrator', () => {
     ).toBe(true);
   });
 
+  test('in memory expire', async () => {
+    const query = (id) => ({
+      query: 'SELECT * FROM orders',
+      values: [],
+      cacheKeyQueries: {
+        queries: [
+          ['SELECT NOW()', [], {
+            renewalThreshold: 21600,
+          }],
+          ['SELECT date_trunc(\'hour\', (NOW()::timestamptz AT TIME ZONE \'UTC\'))', [], {
+            renewalThreshold: 21600,
+          }]
+        ]
+      },
+      preAggregations: [{
+        preAggregationsSchema: 'stb_pre_aggregations',
+        tableName: 'stb_pre_aggregations.orders_d20201103',
+        loadSql: ['CREATE TABLE stb_pre_aggregations.orders_d20201103 AS SELECT * FROM public.orders', []],
+        invalidateKeyQueries: [['SELECT NOW() as now', [], {
+          renewalThreshold: 86400,
+        }]]
+      }],
+      expireSecs: 2,
+      requestId: `in memory expire ${id}`,
+    });
+    await queryOrchestrator.fetchQuery(query(0));
+    await queryOrchestrator.fetchQuery(query(1));
+    await mockDriver.delay(2000);
+    await queryOrchestrator.fetchQuery(query(2));
+    expect(
+      mockDriver.executedQueries.filter(q => q.match(/timestamptz/)).length
+    ).toBe(2);
+  });
+
   test('load cache should respect external flag', async () => {
     const preAggregationsLoadCacheByDataSource = {};
     const externalPreAggregation = {
@@ -1014,6 +1062,7 @@ describe('QueryOrchestrator', () => {
           ['SELECT MAX(timestamp) FROM orders', []],
         ],
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC'
       }],
       requestId: 'range partitions',
@@ -1056,6 +1105,7 @@ describe('QueryOrchestrator', () => {
           ['SELECT MAX(timestamp) FROM orders', []],
         ],
         partitionGranularity: 'hour',
+        timestampPrecision: 3,
         timezone: 'UTC'
       }],
       requestId: 'range partitions',
@@ -1096,6 +1146,7 @@ describe('QueryOrchestrator', () => {
           ['SELECT MAX(created_at) FROM orders', []],
         ],
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC'
       }],
       requestId: 'empty partitions',
@@ -1134,6 +1185,7 @@ describe('QueryOrchestrator', () => {
           [endQuery || 'SELECT MAX(created_at) FROM orders', []],
         ],
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC',
         matchedTimeDimensionDateRange
       }],
@@ -1184,6 +1236,7 @@ describe('QueryOrchestrator', () => {
         ],
         matchedTimeDimensionDateRange: ['2021-08-01T00:00:00.000', '2021-08-30T00:00:00.000'],
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC'
       }],
       requestId: 'empty intersection',
@@ -1218,6 +1271,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC',
         rollupLambdaId: 'orders.d_lambda',
         matchedTimeDimensionDateRange
@@ -1240,6 +1294,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'hour',
+        timestampPrecision: 3,
         timezone: 'UTC',
         rollupLambdaId: 'orders.d_lambda',
         lastRollupLambda: true,
@@ -1293,6 +1348,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'week',
+        timestampPrecision: 3,
         timezone: 'UTC',
         rollupLambdaId: 'orders.d_lambda',
         matchedTimeDimensionDateRange
@@ -1315,6 +1371,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC',
         rollupLambdaId: 'orders.d_lambda',
         matchedTimeDimensionDateRange
@@ -1337,6 +1394,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'hour',
+        timestampPrecision: 3,
         timezone: 'UTC',
         rollupLambdaId: 'orders.d_lambda',
         lastRollupLambda: true,
@@ -1379,6 +1437,7 @@ describe('QueryOrchestrator', () => {
         ],
         external: true,
         partitionGranularity: 'day',
+        timestampPrecision: 3,
         timezone: 'UTC',
         matchedTimeDimensionDateRange
       }],
@@ -1602,11 +1661,6 @@ describe('QueryOrchestrator', () => {
     expect(mockDriver.tables).toContainEqual(expect.stringMatching(/orders_delay/));
   });
 
-  test('fetch table schema', async () => {
-    const schema = await queryOrchestrator.fetchSchema('foo');
-    expect(schema).toEqual(schemaData);
-  });
-
   test('streaming simple', async () => {
     const query = (id) => ({
       query: `SELECT * FROM stb_pre_aggregations.orders_d WHERE id = ${id}`,
@@ -1680,8 +1734,39 @@ describe('QueryOrchestrator', () => {
     }));
   });
 
-  test('fetch table schema from external db', async () => {
-    const schema = await queryOrchestrator.fetchSchema(undefined, true);
-    expect(schema).toEqual(schemaData);
+  test('drop lock', async () => {
+    mockDriver.tablesDropDelay = 300;
+    for (let i = 0; i < 10; i++) {
+      const promises = [];
+      for (let j = 0; j < 10; j++) {
+        // eslint-disable-next-line no-loop-func
+        promises.push((async () => {
+          await mockDriver.delay(100 * j);
+          await queryOrchestratorDropWithoutTouch.fetchQuery({
+            query: `SELECT * FROM stb_pre_aggregations.orders_d2018110${j}`,
+            values: [],
+            cacheKeyQueries: {
+              renewalThreshold: 21600,
+              queries: []
+            },
+            preAggregations: [{
+              preAggregationsSchema: 'stb_pre_aggregations',
+              tableName: `stb_pre_aggregations.orders_d2018110${j}`,
+              loadSql: [`CREATE TABLE stb_pre_aggregations.orders_d2018110${j} AS SELECT * FROM public.orders_d`, []],
+              invalidateKeyQueries: [['SELECT NOW()', [], {
+                renewalThreshold: 0.001
+              }]],
+              external: true,
+            }],
+            requestId: `drop lock ${i}-${j}`
+          });
+        })());
+      }
+
+      await Promise.all(promises);
+
+      await mockDriver.delay(200);
+    }
+    // expect(mockDriver.tables).toContainEqual(expect.stringMatching(/orders_delay/));
   });
 });

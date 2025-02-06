@@ -31,29 +31,16 @@ describe('Transpilers', () => {
     }
   });
 
-  it('ValidationTranspiler', async () => {
-    const warnings: string[] = [];
-
+  it('CubePropContextTranspiler', async () => {
     const { compiler } = prepareCompiler(`
+        let { securityContext } = COMPILE_CONTEXT;
+
         cube(\`Test\`, {
-          sql: \`select * from test \${USER_CONTEXT.test1.filter('test1')}\`,
-          dimensions: {
-            test1: {
-              sql: 'test_1',
-              type: 'number'
-            },
-          }
-        });
-      `, {
-      errorReport: {
-        logger: (msg) => {
-          warnings.push(msg);
-        }
-      }
-    });
+          sql_table: 'public.user_\${securityContext.tenantId}',
+          dimensions: {}
+        })
+    `);
 
     await compiler.compile();
-
-    expect(warnings[0]).toMatch(/Warning: USER_CONTEXT was deprecated in favor of SECURITY_CONTEXT. in main.js/);
   });
 });

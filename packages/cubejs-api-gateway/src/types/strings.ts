@@ -75,7 +75,9 @@ type FilterOperator =
  'notInDateRange' |
  'onTheDate' |
  'beforeDate' |
+ 'beforeOrOnDate' |
  'afterDate' |
+ 'afterOrOnDate' |
  'measureFilter';
 
 /**
@@ -99,10 +101,9 @@ type QueryOrderType =
   'desc';
 
 /**
- * Permission data type.
+ * ApiScopes data type.
  */
-type Permission =
-  'liveliness' |
+type ApiScopes =
   'graphql' |
   'meta' |
   'data' |
@@ -119,5 +120,5 @@ export {
   FilterOperator,
   QueryTimeDimensionGranularity,
   QueryOrderType,
-  Permission,
+  ApiScopes,
 };
