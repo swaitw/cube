@@ -14,7 +14,7 @@ export interface CompilerErrorInterface {
 export interface SyntaxErrorInterface {
   message: string;
   plainMessage?: string
-  loc: SourceLocation | null,
+  loc: SourceLocation | null | undefined,
 }
 
 interface File {
@@ -135,6 +135,22 @@ export class ErrorReporter {
         this.rootReporter().errors.map((e) => e.plainMessage).join('\n')
       );
     }
+  }
+
+  public getErrors() {
+    return this.rootReporter().errors;
+  }
+
+  public addErrors(errors: CompilerErrorInterface[]) {
+    this.rootReporter().errors.push(...errors);
+  }
+
+  public getWarnings() {
+    return this.rootReporter().warnings;
+  }
+
+  public addWarnings(warnings: SyntaxErrorInterface[]) {
+    this.rootReporter().warnings.push(...warnings);
   }
 
   protected rootReporter(): ErrorReporter {

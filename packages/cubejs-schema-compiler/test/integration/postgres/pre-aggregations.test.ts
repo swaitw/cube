@@ -13,13 +13,13 @@ describe('PreAggregations', () => {
       select * from visitors WHERE \${FILTER_PARAMS.visitors.createdAt.filter('created_at')}
       AND \${FILTER_PARAMS.ReferenceOriginalSql.createdAt.filter('created_at')}
       \`,
-      
+
       joins: {
         visitor_checkins: {
           relationship: 'hasMany',
           sql: \`\${CUBE.id} = \${visitor_checkins.visitor_id}\`
         },
-        
+
         cards: {
           relationship: 'hasMany',
           sql: \`\${visitors.id} = \${cards.visitorId}\`
@@ -30,12 +30,12 @@ describe('PreAggregations', () => {
         count: {
           type: 'count'
         },
-        
+
         checkinsTotal: {
           sql: \`\${checkinsCount}\`,
           type: 'sum'
         },
-        
+
         checkinsRollingTotal: {
           sql: \`\${checkinsCount}\`,
           type: 'sum',
@@ -43,7 +43,7 @@ describe('PreAggregations', () => {
             trailing: 'unbounded'
           }
         },
-        
+
         checkinsRolling2day: {
           sql: \`\${checkinsCount}\`,
           type: 'sum',
@@ -51,21 +51,31 @@ describe('PreAggregations', () => {
             trailing: '2 day'
           }
         },
-        
+
         uniqueSourceCount: {
           sql: 'source',
           type: 'countDistinct'
         },
-        
+
         countDistinctApprox: {
           sql: 'id',
           type: 'countDistinctApprox'
         },
-        
+
         ratio: {
           sql: \`\${uniqueSourceCount} / nullif(\${checkinsTotal}, 0)\`,
           type: 'number'
-        }
+        },
+
+        googleUniqueSourceCount: {
+          sql: \`\${CUBE.source}\`,
+          filters: [{
+            sql: \`\${CUBE}.source = 'google'\`
+          }],
+          type: 'countDistinct'
+        },
+
+
       },
 
       dimensions: {
@@ -78,9 +88,23 @@ describe('PreAggregations', () => {
           type: 'string',
           sql: 'source'
         },
+        sourceAndId: {
+          type: 'string',
+          sql: \`\${source} || '_' || \${id}\`,
+        },
         createdAt: {
           type: 'time',
-          sql: 'created_at'
+          sql: 'created_at',
+          granularities: {
+            hourTenMinOffset: {
+              interval: '1 hour',
+              offset: '10 minutes'
+            }
+          }
+        },
+        signedUpAt: {
+          type: 'time',
+          sql: \`\${createdAt}\`
         },
         checkinsCount: {
           type: 'number',
@@ -89,13 +113,13 @@ describe('PreAggregations', () => {
           propagateFiltersToSubQuery: true
         }
       },
-      
+
       segments: {
         google: {
           sql: \`source = 'google'\`
         }
       },
-      
+
       preAggregations: {
         default: {
           type: 'originalSql',
@@ -169,6 +193,20 @@ describe('PreAggregations', () => {
           timeDimensionReference: createdAt,
           granularity: 'day'
         },
+        uniqueSourceCountRollup: {
+          type: 'rollup',
+          measures: [uniqueSourceCount],
+          dimensions: [source],
+          timeDimension: createdAt,
+          granularity: 'day'
+        },
+        googleUniqueSourceCountRollup: {
+          type: 'rollup',
+          measures: [googleUniqueSourceCount],
+          dimensions: [source],
+          timeDimension: signedUpAt,
+          granularity: 'day'
+        },
         forJoin: {
           type: 'rollup',
           dimensionReferences: [id, source]
@@ -192,15 +230,33 @@ describe('PreAggregations', () => {
           granularity: 'hour',
           partitionGranularity: 'month'
         },
+        countCustomGranularity: {
+          measures: [count],
+          timeDimension: createdAt,
+          granularity: 'hourTenMinOffset'
+        },
+        sourceAndIdRollup: {
+          measures: [count],
+          dimensions: [sourceAndId, source],
+          timeDimension: createdAt,
+          granularity: 'hour',
+          allowNonStrictDateRangeMatch: true
+        },
+        visitorsMultiplied: {
+          measures: [count],
+          dimensions: [visitor_checkins.source],
+          timeDimension: createdAt,
+          granularity: 'day',
+        }
       }
     })
-    
-    
+
+
     cube('visitor_checkins', {
       sql: \`
       select * from visitor_checkins
       \`,
-      
+
       sqlAlias: 'vc',
 
       measures: {
@@ -228,7 +284,7 @@ describe('PreAggregations', () => {
           sql: 'created_at'
         }
       },
-      
+
       preAggregations: {
         main: {
           type: 'originalSql'
@@ -289,7 +345,7 @@ describe('PreAggregations', () => {
         }
       }
     });
-    
+
     cube('cards', {
       sql: \`
       select * from cards
@@ -307,13 +363,13 @@ describe('PreAggregations', () => {
           sql: 'id',
           primaryKey: true
         },
-        
+
         visitorId: {
           type: 'number',
           sql: 'visitor_id'
         }
       },
-      
+
       preAggregations: {
         forJoin: {
           type: 'rollup',
@@ -322,7 +378,7 @@ describe('PreAggregations', () => {
         },
       }
     });
-    
+
     cube('GoogleVisitors', {
       refreshKey: {
         immutable: true,
@@ -330,14 +386,14 @@ describe('PreAggregations', () => {
       extends: visitors,
       sql: \`select v.* from \${visitors.sql()} v where v.source = 'google'\`
     })
-    
+
     cube('EveryHourVisitors', {
       refreshKey: {
         immutable: true,
       },
       extends: visitors,
       sql: \`select v.* from \${visitors.sql()} v where v.source = 'google'\`,
-      
+
       preAggregations: {
         default: {
           type: 'originalSql',
@@ -360,16 +416,16 @@ describe('PreAggregations', () => {
         }
       }
     })
-    
+
     cube('EmptyHourVisitors', {
       extends: EveryHourVisitors,
       sql: \`select v.* from \${visitors.sql()} v where created_at < '2000-01-01'\`
     })
-    
+
     cube('ReferenceOriginalSql', {
       extends: visitors,
       sql: \`select v.* from \${visitors.sql()} v where v.source = 'google'\`,
-      
+
       preAggregations: {
         partitioned: {
           type: 'rollup',
@@ -387,33 +443,33 @@ describe('PreAggregations', () => {
         }
       }
     })
-    
+
     cube('VisitorView', {
       sql: \`SELECT 1\`,
-      
+
       measures: {
         checkinsTotal: {
           sql: \`\${visitors.checkinsTotal}\`,
           type: 'number',
         }
       },
-      
+
       dimensions: {
         source: {
           sql: \`\${visitors.source}\`,
           type: 'string',
         },
-        
+
         createdAt: {
           sql: \`\${visitors.createdAt}\`,
           type: 'time'
         }
       },
     });
-    
+
     cube('LambdaVisitors', {
       extends: visitors,
-      
+
       preAggregations: {
         partitionedLambda: {
           type: 'rollupLambda',
@@ -434,11 +490,11 @@ describe('PreAggregations', () => {
         }
       }
     });
-    
+
     cube('RealTimeLambdaVisitors', {
       dataSource: 'ksql',
       extends: visitors,
-      
+
       preAggregations: {
         partitioned: {
           type: 'rollup',
@@ -446,9 +502,18 @@ describe('PreAggregations', () => {
           dimensions: [id, source],
           timeDimension: createdAt,
           granularity: 'day',
+          build_range_start: { sql: "SELECT DATE_SUB(NOW(), interval '96 hour')" },
+          build_range_end: { sql: "SELECT NOW()" },
           partitionGranularity: 'day'
         }
       }
+    });
+
+    view('visitors_view', {
+      cubes: [{
+        join_path: visitors,
+        includes: '*'
+      }]
     });
     `);
 
@@ -488,6 +553,92 @@ describe('PreAggregations', () => {
             visitors__created_at_day: '2017-01-06T00:00:00.000Z',
             visitors__count: '2'
           }
+        ]
+      );
+    });
+  }));
+
+  it('simple pre-aggregation (allowNonStrictDateRangeMatch: true)', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors.count'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors.createdAt',
+        dateRange: ['2017-01-01 00:10:00.000', '2017-01-29 22:59:59.999'],
+        granularity: 'hour',
+      }],
+      timezone: 'America/Los_Angeles',
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    expect(query.preAggregations?.preAggregationForQuery?.canUsePreAggregation).toEqual(true);
+    expect(queryAndParams[0]).toMatch(/visitors_source_and_id_rollup/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors__count: '1',
+            visitors__created_at_hour: '2017-01-02T16:00:00.000Z',
+          },
+          {
+            visitors__count: '1',
+            visitors__created_at_hour: '2017-01-04T16:00:00.000Z',
+          },
+          {
+            visitors__count: '1',
+            visitors__created_at_hour: '2017-01-05T16:00:00.000Z',
+          },
+          {
+            visitors__count: '2',
+            visitors__created_at_hour: '2017-01-06T16:00:00.000Z',
+          },
+        ]
+      );
+    });
+  }));
+
+  it('simple pre-aggregation with custom granularity (exact match)', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors.count'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors.createdAt',
+        dateRange: ['2017-01-01 00:10:00.000', '2017-01-29 22:09:59.999'],
+        granularity: 'hourTenMinOffset',
+      }],
+      timezone: 'America/Los_Angeles',
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    expect(query.preAggregations?.preAggregationForQuery?.canUsePreAggregation).toEqual(true);
+    expect(queryAndParams[0]).toMatch(/visitors_count_custom_granularity/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors__count: '1',
+            visitors__created_at_hourTenMinOffset: '2017-01-02T15:10:00.000Z',
+          },
+          {
+            visitors__count: '1',
+            visitors__created_at_hourTenMinOffset: '2017-01-04T15:10:00.000Z',
+          },
+          {
+            visitors__count: '1',
+            visitors__created_at_hourTenMinOffset: '2017-01-05T15:10:00.000Z',
+          },
+          {
+            visitors__count: '2',
+            visitors__created_at_hourTenMinOffset: '2017-01-06T15:10:00.000Z',
+          },
         ]
       );
     });
@@ -534,6 +685,372 @@ describe('PreAggregations', () => {
           {
             visitors__created_at_day: '2017-01-06T00:00:00.000Z',
             visitors__ratio: null
+          }
+        ]
+      );
+    });
+  }));
+
+  it('leaf measure view pre-aggregation', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.ratio'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors_view.createdAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      timezone: 'America/Los_Angeles',
+      order: [{
+        id: 'visitors_view.createdAt'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_ratio/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__created_at_day: '2017-01-02T00:00:00.000Z',
+            visitors_view__ratio: '0.33333333333333333333'
+          },
+          {
+            visitors_view__created_at_day: '2017-01-04T00:00:00.000Z',
+            visitors_view__ratio: '0.50000000000000000000'
+          },
+          {
+            visitors_view__created_at_day: '2017-01-05T00:00:00.000Z',
+            visitors_view__ratio: '1.00000000000000000000'
+          },
+          {
+            visitors_view__created_at_day: '2017-01-06T00:00:00.000Z',
+            visitors_view__ratio: null
+          }
+        ]
+      );
+    });
+  }));
+
+  it('non-additive measure view pre-aggregation', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.uniqueSourceCount'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors_view.signedUpAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      timezone: 'America/Los_Angeles',
+      order: [{
+        id: 'visitors_view.createdAt'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_ratio/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__signed_up_at_day: '2017-01-02T00:00:00.000Z',
+            visitors_view__unique_source_count: '1'
+          },
+          {
+            visitors_view__signed_up_at_day: '2017-01-04T00:00:00.000Z',
+            visitors_view__unique_source_count: '1'
+          },
+          {
+            visitors_view__signed_up_at_day: '2017-01-05T00:00:00.000Z',
+            visitors_view__unique_source_count: '1'
+          },
+          {
+            visitors_view__signed_up_at_day: '2017-01-06T00:00:00.000Z',
+            visitors_view__unique_source_count: '0'
+          }
+        ]
+      );
+    });
+  }));
+
+  it('non-additive single value view filter', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.uniqueSourceCount'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors_view.signedUpAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      filters: [{
+        dimension: 'visitors_view.source',
+        operator: 'equals',
+        values: ['google']
+      }],
+      timezone: 'America/Los_Angeles',
+      order: [{
+        id: 'visitors_view.createdAt'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_unique_source_count/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__signed_up_at_day: '2017-01-05T00:00:00.000Z',
+            visitors_view__unique_source_count: '1'
+          }
+        ]
+      );
+    });
+  }));
+
+  it('non-additive single value view filtered measure', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.googleUniqueSourceCount'
+      ],
+      timeDimensions: [{
+        dimension: 'visitors_view.signedUpAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      filters: [{
+        dimension: 'visitors_view.source',
+        operator: 'equals',
+        values: ['google']
+      }],
+      timezone: 'America/Los_Angeles',
+      order: [{
+        id: 'visitors_view.createdAt'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_google_unique_source_count/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__signed_up_at_day: '2017-01-05T00:00:00.000Z',
+            visitors_view__google_unique_source_count: '1'
+          }
+        ]
+      );
+    });
+  }));
+
+  it('multiplied measure no match', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors.count'
+      ],
+      dimensions: ['visitor_checkins.source'],
+      order: [{
+        id: 'visitor_checkins.source'
+      }],
+      timezone: 'America/Los_Angeles',
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    expect(queryAndParams[0]).toMatch(/count\(distinct/ig);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription).filter(p => p.type === 'rollup').length).toBe(0);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            vc__source: 'google',
+            visitors__count: '1'
+          },
+          {
+            vc__source: null,
+            visitors__count: '6'
+          },
+        ]
+      );
+    });
+  }));
+
+  it('multiplied measure match', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors.count'
+      ],
+      dimensions: ['visitor_checkins.source'],
+      timeDimensions: [{
+        dimension: 'visitors.createdAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      order: [{
+        id: 'visitors.createdAt'
+      }, {
+        id: 'visitor_checkins.source'
+      }],
+      timezone: 'America/Los_Angeles',
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/multiplied/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            vc__source: 'google',
+            visitors__count: '1',
+            visitors__created_at_day: '2017-01-02T00:00:00.000Z',
+          },
+          {
+            vc__source: null,
+            visitors__count: '1',
+            visitors__created_at_day: '2017-01-02T00:00:00.000Z',
+          },
+          {
+            vc__source: null,
+            visitors__count: '1',
+            visitors__created_at_day: '2017-01-04T00:00:00.000Z',
+          },
+          {
+            vc__source: null,
+            visitors__count: '1',
+            visitors__created_at_day: '2017-01-05T00:00:00.000Z',
+          },
+          {
+            vc__source: null,
+            visitors__count: '2',
+            visitors__created_at_day: '2017-01-06T00:00:00.000Z',
+          },
+        ]
+      );
+    });
+  }));
+
+  it('non-leaf additive measure', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.count'
+      ],
+      dimensions: ['visitors_view.sourceAndId'],
+      timezone: 'America/Los_Angeles',
+      order: [{
+        id: 'visitors_view.sourceAndId'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_source_and_id_rollup/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__count: '1',
+            visitors_view__source_and_id: 'google_3'
+          },
+          {
+            visitors_view__count: '1',
+            visitors_view__source_and_id: 'some_1'
+          },
+          {
+            visitors_view__count: '1',
+            visitors_view__source_and_id: 'some_2'
+          },
+          {
+            visitors_view__count: '3',
+            visitors_view__source_and_id: null
+          }
+        ]
+      );
+    });
+  }));
+
+  it('non-leaf additive measure with time dimension', () => compiler.compile().then(() => {
+    const query = new PostgresQuery({ joinGraph, cubeEvaluator, compiler }, {
+      measures: [
+        'visitors_view.count'
+      ],
+      dimensions: ['visitors_view.sourceAndId'],
+      timezone: 'America/Los_Angeles',
+      timeDimensions: [{
+        dimension: 'visitors_view.signedUpAt',
+        granularity: 'day',
+        dateRange: ['2017-01-01', '2017-01-30']
+      }],
+      order: [{
+        id: 'visitors_view.createdAt',
+      }, {
+        id: 'visitors_view.sourceAndId'
+      }],
+      preAggregationsSchema: ''
+    });
+
+    const queryAndParams = query.buildSqlAndParams();
+    console.log(queryAndParams);
+    const preAggregationsDescription = query.preAggregations?.preAggregationsDescription();
+    console.log(preAggregationsDescription);
+    expect((<any>preAggregationsDescription)[0].loadSql[0]).toMatch(/visitors_source_and_id_rollup/);
+
+    return dbRunner.evaluateQueryWithPreAggregations(query).then(res => {
+      expect(res).toEqual(
+        [
+          {
+            visitors_view__count: '1',
+            visitors_view__signed_up_at_day: '2017-01-05T00:00:00.000Z',
+            visitors_view__source_and_id: 'google_3'
+          },
+          {
+            visitors_view__count: '1',
+            visitors_view__signed_up_at_day: '2017-01-02T00:00:00.000Z',
+            visitors_view__source_and_id: 'some_1'
+          },
+          {
+            visitors_view__count: '1',
+            visitors_view__signed_up_at_day: '2017-01-04T00:00:00.000Z',
+            visitors_view__source_and_id: 'some_2'
+          },
+          {
+            visitors_view__count: '2',
+            visitors_view__signed_up_at_day: '2017-01-06T00:00:00.000Z',
+            visitors_view__source_and_id: null
           }
         ]
       );
@@ -1477,7 +1994,6 @@ describe('PreAggregations', () => {
       timezone: 'America/Los_Angeles',
       preAggregationsSchema: '',
       timeDimensions: [],
-      order: [],
     });
 
     const queryAndParams = query.buildSqlAndParams();
@@ -1709,6 +2225,6 @@ describe('PreAggregations', () => {
 
     expect(partitionInvalidateKeyQueries).toStrictEqual([]);
     expect(loadSql[0]).not.toMatch(/GROUP BY/);
-    expect(loadSql[0]).toMatch(/1 `real_time_lambda_visitors__count`/);
+    expect(loadSql[0]).toMatch(/THEN 1 END `real_time_lambda_visitors__count`/);
   }));
 });

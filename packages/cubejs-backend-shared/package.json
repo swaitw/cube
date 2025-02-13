@@ -1,6 +1,6 @@
 {
   "name": "@cubejs-backend/shared",
-  "version": "0.32.17",
+  "version": "1.2.5",
   "description": "Shared code for Cube.js backend packages",
   "main": "dist/src/index.js",
   "typings": "dist/src/index.d.ts",
@@ -22,17 +22,17 @@
   "author": "Cube Dev, Inc.",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@cubejs-backend/linter": "^0.32.12",
+    "@cubejs-backend/linter": "1.2.5",
     "@types/bytes": "^3.1.0",
     "@types/cli-progress": "^3.9.1",
     "@types/decompress": "^4.2.3",
-    "@types/jest": "^26.0.16",
-    "@types/node": "^12",
+    "@types/jest": "^27",
+    "@types/node": "^18",
     "@types/node-fetch": "^2.5.8",
     "@types/shelljs": "^0.8.5",
     "@types/throttle-debounce": "^2.1.0",
-    "jest": "^26.6.3",
-    "typescript": "~4.9.5"
+    "jest": "^27",
+    "typescript": "~5.2.2"
   },
   "dependencies": {
     "@oclif/color": "^0.1.2",
@@ -44,7 +44,7 @@
     "fs-extra": "^9.1.0",
     "http-proxy-agent": "^4.0.1",
     "moment-range": "^4.0.1",
-    "moment-timezone": "^0.5.33",
+    "moment-timezone": "^0.5.46",
     "node-fetch": "^2.6.1",
     "shelljs": "^0.8.5",
     "throttle-debounce": "^3.0.1",

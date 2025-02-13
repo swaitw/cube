@@ -1,7 +1,7 @@
 use datafusion::scalar::ScalarValue;
 use std::collections::HashMap;
 
-use crate::sql::database_variables::{DatabaseVariable, DatabaseVariables};
+use crate::compile::{DatabaseVariable, DatabaseVariables};
 
 pub fn defaults() -> DatabaseVariables {
     let mut variables: DatabaseVariables = HashMap::new();
@@ -83,6 +83,24 @@ pub fn defaults() -> DatabaseVariables {
         DatabaseVariable::system(
             "standard_conforming_strings".to_string(),
             ScalarValue::Utf8(Some("on".to_string())),
+            None,
+        ),
+    );
+
+    variables.insert(
+        "max_identifier_length".to_string(),
+        DatabaseVariable::system(
+            "max_identifier_length".to_string(),
+            ScalarValue::UInt32(Some(63)),
+            None,
+        ),
+    );
+
+    variables.insert(
+        "role".to_string(),
+        DatabaseVariable::system(
+            "role".to_string(),
+            ScalarValue::Utf8(Some("none".to_string())),
             None,
         ),
     );
